@@ -1,0 +1,51 @@
+# flights-mcp
+
+MCP server for flight search via [SerpAPI](https://serpapi.com) (Google Flights), based on [skarlekar/mcp_travelassistant](https://github.com/skarlekar/mcp_travelassistant).
+
+## Local (stdio)
+
+```bash
+python -m venv .venv
+.venv\Scripts\activate   # Windows
+pip install -r requirements.txt
+set SERPAPI_KEY=your_key
+python flight_server.py
+```
+
+Or with FastMCP CLI and SSE on `http://127.0.0.1:8765/sse`:
+
+```bash
+set SERPAPI_KEY=your_key
+python -m fastmcp run flight_server.py --transport sse --host 127.0.0.1 --port 8765
+```
+
+## Deploy on Render
+
+1. Push this repo to GitHub.
+2. In Render: **New** → **Blueprint** (connect repo) or **Web Service** with:
+   - **Build:** `pip install -r requirements.txt`
+   - **Start:** `python flight_server.py`
+   - **Environment:** `MCP_TRANSPORT=sse` (already in `render.yaml`), `SERPAPI_KEY` = your secret.
+3. Render sets `PORT` automatically; the app listens with SSE on `0.0.0.0`.
+
+### Cursor (`mcp.json`)
+
+Use your service URL and the SSE path (often `/sse`):
+
+```json
+{
+  "mcpServers": {
+    "flights": {
+      "url": "https://<service>.onrender.com/sse"
+    }
+  }
+}
+```
+
+## Environment variables
+
+| Variable         | Required | Description                          |
+|------------------|----------|--------------------------------------|
+| `SERPAPI_KEY`    | Yes      | SerpAPI key                          |
+| `MCP_TRANSPORT`  | No       | Set to `sse` on Render; omit locally for stdio |
+| `PORT`           | No       | Set by Render                        |

@@ -1,0 +1,15 @@
+# https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: flights-mcp
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python flight_server.py
+    envVars:
+      - key: MCP_TRANSPORT
+        value: sse
+      - key: PYTHON_VERSION
+        value: 3.12.8
+      - key: SERPAPI_KEY
+        sync: false
