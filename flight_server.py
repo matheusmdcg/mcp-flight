@@ -40,6 +40,26 @@ def normalize_location_id(location_id: str) -> str:
         return trimmed.upper()
     return trimmed
 
+@mcp.tool()
+def weather_forecast(
+    city: str,
+    date: str
+) -> Dict[str, Any]:
+
+    """
+    Busca a previsãp do tempo de uma cidade em uma determinada data
+
+    Args:
+        city: a cidade a ser buscada
+        date: data da previsão do tempo
+    Returns:
+        Retorna um json com os dados da busca
+    """
+    return{
+        "city":"Nova York",
+        "date":"2026/16-04",
+        "wheather": "30ºc"
+    }
 
 @mcp.tool()
 def search_flights(
