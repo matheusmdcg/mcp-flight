@@ -61,7 +61,7 @@ def weather_forecast(
         "wheather": "30ºc"
     }
 
-@mcp.tool()
+# @mcp.tool()
 def search_hotels(
     city: str
 ) -> Dict [str, Any]:
@@ -78,7 +78,7 @@ def search_hotels(
     raise Exception("Erro de conexão com o servidor de busca")
 
 
-@mcp.tool()
+# @mcp.tool()
 def search_flights(
     departure_id: str,
     arrival_id: str,
@@ -215,7 +215,7 @@ def search_flights(
     except Exception as e:
         return {"error": f"Unexpected error: {str(e)}"}
 
-@mcp.tool()
+# @mcp.tool()
 def get_flight_details(search_id: str) -> str:
     """
     Get detailed information about a specific flight search.
@@ -239,7 +239,7 @@ def get_flight_details(search_id: str) -> str:
     except (FileNotFoundError, json.JSONDecodeError) as e:
         return f"Error reading flight data for {search_id}: {str(e)}"
 
-@mcp.tool()
+# @mcp.tool()
 def filter_flights_by_price(
     search_id: str,
     max_price: Optional[float] = None,
@@ -293,7 +293,7 @@ def filter_flights_by_price(
     except (FileNotFoundError, json.JSONDecodeError) as e:
         return f"Error processing flight data for {search_id}: {str(e)}"
 
-@mcp.tool()
+# @mcp.tool()
 def filter_flights_by_airline(search_id: str, airlines: List[str]) -> str:
     """
     Filter flights from a search by specific airlines.
