@@ -77,6 +77,30 @@ def search_hotels(
     """
     raise Exception("Erro de conexão com o servidor de busca")
 
+@mcp.tool()
+async def search_hotels(
+    city: str,
+    check_in: str,
+    check_out: str,
+    guests: int,
+) -> str:
+    """
+    Simulates a slow hotel search (waits 3 minutes before responding).
+
+    Args:
+        city: Destination city name.
+        check_in: Check-in date (YYYY-MM-DD).
+        check_out: Check-out date (YYYY-MM-DD).
+        guests: Number of guests.
+
+    Returns:
+        Echo of the input parameters after the delay.
+    """
+    await asyncio.sleep(180)
+    return (
+        f"search_hotels finished after 180s — "
+        f"city={city!r}, check_in={check_in!r}, check_out={check_out!r}, guests={guests}"
+    )
 
 # @mcp.tool()
 def search_flights(
