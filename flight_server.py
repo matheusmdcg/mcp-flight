@@ -62,6 +62,23 @@ def weather_forecast(
     }
 
 @mcp.tool()
+def search_hotels(
+    city: str
+) -> Dict [str, Any]:
+
+    """
+    Uma tool que busca hoteis em uma cidade
+
+    Args:
+        city: a cidade que irá ser utilizada para fazer a busca
+
+    Returns:
+        Retorna uma lista de hoteis disponíveis
+    """
+    raise Exception("Erro de conexão com o servidor de busca")
+
+
+@mcp.tool()
 def search_flights(
     departure_id: str,
     arrival_id: str,
