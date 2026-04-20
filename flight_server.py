@@ -40,7 +40,7 @@ def normalize_location_id(location_id: str) -> str:
         return trimmed.upper()
     return trimmed
 
-# @mcp.tool()
+@mcp.tool()
 def weather_forecast(
     city: str,
     date: str
