@@ -1,30 +1,21 @@
-import requests
-import json
 import os
+import json
 import asyncio
-from typing import List, Dict, Optional, Any
-from datetime import datetime, timedelta
+from typing import Dict, Any, Optional, List
+from datetime import datetime
 from mcp.server.fastmcp import FastMCP
 
-# Directory to store flight search results
-FLIGHTS_DIR = "flights"
-
-
+# Reaproveita o estilo do seu server atual (host/port via env)
 def _listen_host() -> str:
-    """HTTP bind host for SSE (mcp.server.fastmcp reads host/port from FastMCP settings, not run())."""
     if os.environ.get("MCP_TRANSPORT", "").lower() == "sse":
         return os.environ.get("FASTMCP_HOST", "0.0.0.0")
     return "127.0.0.1"
 
-
 def _listen_port() -> int:
-    """HTTP port: Render sets PORT; optional FASTMCP_PORT for local SSE."""
     port_str = os.environ.get("PORT") or os.environ.get("FASTMCP_PORT")
     return int(port_str) if port_str else 8000
 
-
-# Initialize FastMCP server (host/port apply to SSE/streamable-http; ignored for stdio)
-mcp = FastMCP("flight-assistant", host=_listen_host(), port=_listen_port())
+mcp = FastMCP("travel-mock-assistant", host=_listen_host(), port=_listen_port())
 
 def get_serpapi_key() -> str:
     """Get SerpAPI key from environment variable."""
@@ -41,576 +32,222 @@ def normalize_location_id(location_id: str) -> str:
         return trimmed.upper()
     return trimmed
 
-# @mcp.tool()
-def weather_forecast(
-    city: str,
-    date: str
-) -> Dict[str, Any]:
+FLIGHTS_DIR = "flights"     # segue a mesma ideia do seu arquivo atual
+TRIPS_DIR = "trips"         # novo: onde vamos salvar planos
 
-    """
-    Busca a previsãp do tempo de uma cidade em uma determinada data
+# ----------------------------
+# Helpers de persistência
+# ----------------------------
+def _ensure_dir(path: str) -> None:
+    os.makedirs(path, exist_ok=True)
 
-    Args:
-        city: a cidade a ser buscada
-        date: data da previsão do tempo
-    Returns:
-        Retorna um json com os dados da busca
+def _read_json(path: str) -> Dict[str, Any]:
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+def _write_json(path: str, data: Dict[str, Any]) -> None:
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+# ----------------------------
+# 1) Resolver local (texto livre) -> candidatos (IATA mock)
+# ----------------------------
+@mcp.tool()
+def resolve_location(query: str, country_hint: str = "BR") -> Dict[str, Any]:
     """
-    return{
-        "city":"Nova York",
-        "date":"2026/16-04",
-        "wheather": "30ºc"
+    Resolve um texto livre (ex.: 'São Paulo', 'NYC', 'GRU') em candidatos de aeroportos/cidades.
+    Retorna dados mock (bom para testar roteamento e validação).
+    """
+    q = (query or "").strip().lower()
+
+    # Base mock pequena, determinística
+    db = [
+        {"type": "airport", "name": "São Paulo/Guarulhos", "iata": "GRU", "city": "São Paulo", "country": "BR"},
+        {"type": "airport", "name": "São Paulo/Congonhas", "iata": "CGH", "city": "São Paulo", "country": "BR"},
+        {"type": "airport", "name": "Rio de Janeiro/Galeão", "iata": "GIG", "city": "Rio de Janeiro", "country": "BR"},
+        {"type": "airport", "name": "New York/JFK", "iata": "JFK", "city": "New York", "country": "US"},
+        {"type": "airport", "name": "New York/LaGuardia", "iata": "LGA", "city": "New York", "country": "US"},
+        {"type": "airport", "name": "Paris/Charles de Gaulle", "iata": "CDG", "city": "Paris", "country": "FR"},
+    ]
+
+    # Match simples por substring
+    candidates = []
+    for item in db:
+        hay = " ".join([item["name"], item["iata"], item["city"], item["country"]]).lower()
+        if q and q in hay:
+            candidates.append(item)
+
+    # fallback: se digitou 3 letras, tenta match exato por IATA
+    if not candidates and len(q) == 3 and q.isalpha():
+        for item in db:
+            if item["iata"].lower() == q:
+                candidates.append(item)
+
+    return {
+        "query": query,
+        "country_hint": country_hint,
+        "candidates": candidates[:5],
+        "note": "Dados mock para teste (não é lookup em tempo real)."
     }
 
-# @mcp.tool()
-def search_hotels(
-    city: str
-) -> Dict [str, Any]:
-
-    """
-    Uma tool que busca hoteis em uma cidade
-
-    Args:
-        city: a cidade que irá ser utilizada para fazer a busca
-
-    Returns:
-        Retorna uma lista de hoteis disponíveis
-    """
-    raise Exception("Erro de conexão com o servidor de busca")
-
+# ----------------------------
+# 2) Listar opções de voos a partir de um search_id salvo (UX para escolher)
+#    (o seu server já salva JSON em flights/{search_id}.json)
+# ----------------------------
 @mcp.tool()
-async def search_hotels(
-    city: str,
-    check_in: str,
-    check_out: str,
-    guests: int,
-) -> str:
+def list_flight_options(search_id: str, limit: int = 10, prefer: str = "best") -> Dict[str, Any]:
     """
-    Simulates a slow hotel search (waits 3 minutes before responding).
-
-    Args:
-        city: Destination city name.
-        check_in: Check-in date (YYYY-MM-DD).
-        check_out: Check-out date (YYYY-MM-DD).
-        guests: Number of guests.
-
-    Returns:
-        Echo of the input parameters after the delay.
+    Lê o arquivo flights/{search_id}.json e gera uma lista curta e estável de opções com option_id.
+    Útil para o usuário escolher 'livremente' um voo.
     """
-    await asyncio.sleep(180)    
-    return (
-        f"search_hotels finished after 180s — "
-        f"city={city!r}, check_in={check_in!r}, check_out={check_out!r}, guests={guests}"
-    )
+    _ensure_dir(FLIGHTS_DIR)
+    path = os.path.join(FLIGHTS_DIR, f"{search_id}.json")
+    if not os.path.exists(path):
+        return {"error": f"Nenhuma busca encontrada para search_id={search_id}"}
 
-# @mcp.tool()
-def search_flights(
-    departure_id: str,
-    arrival_id: str,
-    outbound_date: str,
-    return_date: Optional[str] = None,
-    trip_type: int = 1,
-    adults: int = 1,
-    children: int = 0,
-    infants_in_seat: int = 0,
-    infants_on_lap: int = 0,
-    travel_class: int = 1,
-    currency: str = "USD",
-    country: str = "us",
-    language: str = "en",
-    max_results: int = 10
-) -> Dict[str, Any]:
-    """
-    Search for flights using SerpAPI's Google Flights API.
-    
-    Args:
-        departure_id: Departure airport code (e.g., 'LAX', 'JFK') or location kgmid
-        arrival_id: Arrival airport code (e.g., 'CDG', 'LHR') or location kgmid
-        outbound_date: Departure date in YYYY-MM-DD format (e.g., '2024-12-15')
-        return_date: Return date in YYYY-MM-DD format (required for round trips)
-        trip_type: Flight type (1=Round trip, 2=One way, 3=Multi-city)
-        adults: Number of adult passengers (default: 1)
-        children: Number of child passengers (default: 0)
-        infants_in_seat: Number of infants in seat (default: 0)
-        infants_on_lap: Number of infants on lap (default: 0)
-        travel_class: Travel class (1=Economy, 2=Premium economy, 3=Business, 4=First)
-        currency: Currency for prices (default: 'USD')
-        country: Country code for search (default: 'us')
-        language: Language code (default: 'en')
-        max_results: Maximum number of results to store (default: 10)
-        
-    Returns:
-        Dict containing flight search results and metadata
-    """
-    
-    try:
-        api_key = get_serpapi_key()
-        dep_id = normalize_location_id(departure_id)
-        arr_id = normalize_location_id(arrival_id)
+    data = _read_json(path)
+    currency = (data.get("search_metadata", {}) or {}).get("currency", "USD")
 
-        # Build search parameters
-        params = {
-            "engine": "google_flights",
-            "api_key": api_key,
-            "departure_id": dep_id,
-            "arrival_id": arr_id,
-            "outbound_date": outbound_date,
-            "type": trip_type,
-            "adults": adults,
-            "children": children,
-            "infants_in_seat": infants_in_seat,
-            "infants_on_lap": infants_on_lap,
-            "travel_class": travel_class,
+    best = data.get("best_flights", []) or []
+    other = data.get("other_flights", []) or []
+
+    flights = best if prefer == "best" else other if prefer == "other" else (best + other)
+
+    options = []
+    for idx, f in enumerate(flights[: max(1, limit)]):
+        flights_legs = f.get("flights", []) or []
+        airlines = sorted({(leg.get("airline") or "").strip() for leg in flights_legs if leg.get("airline")})
+        options.append({
+            "option_id": f"{prefer}-{idx}",
+            "price": f.get("price"),
             "currency": currency,
-            "gl": country,
-            "hl": language
-        }
-        
-        # Add return date for round trips
-        if trip_type == 1 and return_date:
-            params["return_date"] = return_date
-        elif trip_type == 1 and not return_date:
-            return {"error": "Return date is required for round trip flights"}
-        
-        # Make API request
-        response = requests.get("https://serpapi.com/search", params=params)
-        response.raise_for_status()
-        
-        flight_data = response.json()
-        
-        # Create search identifier
-        search_id = f"{dep_id}_{arr_id}_{outbound_date}"
-        if return_date:
-            search_id += f"_{return_date}"
-        search_id += f"_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        
-        # Create directory structure
-        os.makedirs(FLIGHTS_DIR, exist_ok=True)
-        
-        # Process and store flight results
-        processed_results = {
-            "search_metadata": {
-                "search_id": search_id,
-                "departure": dep_id,
-                "arrival": arr_id,
-                "outbound_date": outbound_date,
-                "return_date": return_date,
-                "trip_type": "Round trip" if trip_type == 1 else "One way" if trip_type == 2 else "Multi-city",
-                "passengers": {
-                    "adults": adults,
-                    "children": children,
-                    "infants_in_seat": infants_in_seat,
-                    "infants_on_lap": infants_on_lap
-                },
-                "travel_class": ["Economy", "Premium economy", "Business", "First"][travel_class - 1],
-                "currency": currency,
-                "search_timestamp": datetime.now().isoformat()
-            },
-            "best_flights": flight_data.get("best_flights", [])[:max_results],
-            "other_flights": flight_data.get("other_flights", [])[:max_results],
-            "price_insights": flight_data.get("price_insights", {}),
-            "airports": flight_data.get("airports", [])
-        }
-        
-        # Save results to file
-        file_path = os.path.join(FLIGHTS_DIR, f"{search_id}.json")
-        with open(file_path, "w") as f:
-            json.dump(processed_results, f, indent=2)
-        
-        print(f"Flight search results saved to: {file_path}")
-        
-        # Return summary for the user
-        summary = {
-            "search_id": search_id,
-            "total_best_flights": len(processed_results["best_flights"]),
-            "total_other_flights": len(processed_results["other_flights"]),
-            "price_range": {
-                "lowest_price": processed_results["price_insights"].get("lowest_price"),
-                "currency": currency
-            },
-            "search_parameters": processed_results["search_metadata"]
-        }
-        
-        return summary
-        
-    except requests.exceptions.RequestException as e:
-        return {"error": f"API request failed: {str(e)}"}
-    except ValueError as e:
-        return {"error": str(e)}
-    except Exception as e:
-        return {"error": f"Unexpected error: {str(e)}"}
+            "total_duration_minutes": f.get("total_duration"),
+            "segments": len(flights_legs),
+            "airlines": airlines,
+        })
 
-# @mcp.tool()
-def get_flight_details(search_id: str) -> str:
-    """
-    Get detailed information about a specific flight search.
-    
-    Args:
-        search_id: The search ID returned from search_flights
-        
-    Returns:
-        JSON string with detailed flight information
-    """
-    
-    file_path = os.path.join(FLIGHTS_DIR, f"{search_id}.json")
-    
-    if not os.path.exists(file_path):
-        return f"No flight search found with ID: {search_id}"
-    
-    try:
-        with open(file_path, "r") as f:
-            flight_data = json.load(f)
-        return json.dumps(flight_data, indent=2)
-    except (FileNotFoundError, json.JSONDecodeError) as e:
-        return f"Error reading flight data for {search_id}: {str(e)}"
+    return {
+        "search_id": search_id,
+        "prefer": prefer,
+        "limit": limit,
+        "options": options,
+        "note": "option_id é estável apenas para a lista gerada (bom para teste de seleção)."
+    }
 
-# @mcp.tool()
-def filter_flights_by_price(
-    search_id: str,
-    max_price: Optional[float] = None,
-    min_price: Optional[float] = None
-) -> str:
-    """
-    Filter flights from a search by price range.
-    
-    Args:
-        search_id: The search ID returned from search_flights
-        max_price: Maximum price filter (optional)
-        min_price: Minimum price filter (optional)
-        
-    Returns:
-        JSON string with filtered flight results
-    """
-    
-    file_path = os.path.join(FLIGHTS_DIR, f"{search_id}.json")
-    
-    if not os.path.exists(file_path):
-        return f"No flight search found with ID: {search_id}"
-    
-    try:
-        with open(file_path, "r") as f:
-            flight_data = json.load(f)
-        
-        def price_filter(flight):
-            price = flight.get("price", 0)
-            if min_price is not None and price < min_price:
-                return False
-            if max_price is not None and price > max_price:
-                return False
-            return True
-        
-        filtered_best = [f for f in flight_data.get("best_flights", []) if price_filter(f)]
-        filtered_other = [f for f in flight_data.get("other_flights", []) if price_filter(f)]
-        
-        result = {
-            "search_id": search_id,
-            "filters_applied": {
-                "min_price": min_price,
-                "max_price": max_price
-            },
-            "filtered_best_flights": filtered_best,
-            "filtered_other_flights": filtered_other,
-            "total_filtered": len(filtered_best) + len(filtered_other)
-        }
-        
-        return json.dumps(result, indent=2)
-        
-    except (FileNotFoundError, json.JSONDecodeError) as e:
-        return f"Error processing flight data for {search_id}: {str(e)}"
-
-# @mcp.tool()
-def filter_flights_by_airline(search_id: str, airlines: List[str]) -> str:
-    """
-    Filter flights from a search by specific airlines.
-    
-    Args:
-        search_id: The search ID returned from search_flights
-        airlines: List of airline names or codes to filter by
-        
-    Returns:
-        JSON string with filtered flight results
-    """
-    
-    file_path = os.path.join(FLIGHTS_DIR, f"{search_id}.json")
-    
-    if not os.path.exists(file_path):
-        return f"No flight search found with ID: {search_id}"
-    
-    try:
-        with open(file_path, "r") as f:
-            flight_data = json.load(f)
-        
-        def airline_filter(flight):
-            flight_airlines = set()
-            for leg in flight.get("flights", []):
-                airline = leg.get("airline", "").lower()
-                flight_airlines.add(airline)
-            
-            return any(airline.lower() in flight_airlines for airline in airlines)
-        
-        filtered_best = [f for f in flight_data.get("best_flights", []) if airline_filter(f)]
-        filtered_other = [f for f in flight_data.get("other_flights", []) if airline_filter(f)]
-        
-        result = {
-            "search_id": search_id,
-            "filters_applied": {
-                "airlines": airlines
-            },
-            "filtered_best_flights": filtered_best,
-            "filtered_other_flights": filtered_other,
-            "total_filtered": len(filtered_best) + len(filtered_other)
-        }
-        
-        return json.dumps(result, indent=2)
-        
-    except (FileNotFoundError, json.JSONDecodeError) as e:
-        return f"Error processing flight data for {search_id}: {str(e)}"
-
-@mcp.resource("flights://searches")
-def get_flight_searches() -> str:
-    """
-    List all available flight searches.
-    
-    This resource provides a list of all saved flight searches.
-    """
-    searches = []
-    
-    if os.path.exists(FLIGHTS_DIR):
-        for filename in os.listdir(FLIGHTS_DIR):
-            if filename.endswith('.json'):
-                search_id = filename[:-5]  # Remove .json extension
-                file_path = os.path.join(FLIGHTS_DIR, filename)
-                try:
-                    with open(file_path, 'r') as f:
-                        data = json.load(f)
-                        metadata = data.get('search_metadata', {})
-                        searches.append({
-                            'search_id': search_id,
-                            'route': f"{metadata.get('departure', 'N/A')} → {metadata.get('arrival', 'N/A')}",
-                            'dates': f"{metadata.get('outbound_date', 'N/A')} - {metadata.get('return_date', 'One way')}",
-                            'passengers': metadata.get('passengers', {}),
-                            'search_time': metadata.get('search_timestamp', 'N/A')
-                        })
-                except (json.JSONDecodeError, KeyError):
-                    continue
-    
-    content = "# Flight Searches\n\n"
-    if searches:
-        content += f"Total searches: {len(searches)}\n\n"
-        for search in searches:
-            content += f"## {search['search_id']}\n"
-            content += f"- **Route**: {search['route']}\n"
-            content += f"- **Dates**: {search['dates']}\n"
-            content += f"- **Passengers**: {search['passengers'].get('adults', 0)} adults"
-            if search['passengers'].get('children', 0) > 0:
-                content += f", {search['passengers']['children']} children"
-            if search['passengers'].get('infants_in_seat', 0) > 0:
-                content += f", {search['passengers']['infants_in_seat']} infants in seat"
-            if search['passengers'].get('infants_on_lap', 0) > 0:
-                content += f", {search['passengers']['infants_on_lap']} infants on lap"
-            content += "\n"
-            content += f"- **Search Time**: {search['search_time']}\n\n"
-            content += "---\n\n"
-    else:
-        content += "No flight searches found.\n\n"
-        content += "Use the search_flights tool to search for flights.\n"
-    
-    return content
-
-@mcp.resource("flights://{search_id}")
-def get_flight_search_details(search_id: str) -> str:
-    """
-    Get detailed information about a specific flight search.
-    
-    Args:
-        search_id: The flight search ID to retrieve details for
-    """
-    file_path = os.path.join(FLIGHTS_DIR, f"{search_id}.json")
-    
-    if not os.path.exists(file_path):
-        return f"# Flight Search Not Found: {search_id}\n\nNo flight search found with this ID."
-    
-    try:
-        with open(file_path, 'r') as f:
-            flight_data = json.load(f)
-        
-        metadata = flight_data.get('search_metadata', {})
-        best_flights = flight_data.get('best_flights', [])
-        other_flights = flight_data.get('other_flights', [])
-        price_insights = flight_data.get('price_insights', {})
-        
-        content = f"# Flight Search: {search_id}\n\n"
-        content += f"## Search Details\n"
-        content += f"- **Route**: {metadata.get('departure', 'N/A')} → {metadata.get('arrival', 'N/A')}\n"
-        content += f"- **Dates**: {metadata.get('outbound_date', 'N/A')}"
-        if metadata.get('return_date'):
-            content += f" - {metadata['return_date']}"
-        content += "\n"
-        content += f"- **Trip Type**: {metadata.get('trip_type', 'N/A')}\n"
-        content += f"- **Travel Class**: {metadata.get('travel_class', 'N/A')}\n"
-        content += f"- **Currency**: {metadata.get('currency', 'USD')}\n"
-        content += f"- **Search Time**: {metadata.get('search_timestamp', 'N/A')}\n\n"
-        
-        # Price insights
-        if price_insights:
-            content += f"## Price Insights\n"
-            if 'lowest_price' in price_insights:
-                content += f"- **Lowest Price**: {price_insights['lowest_price']} {metadata.get('currency', 'USD')}\n"
-            if 'price_level' in price_insights:
-                content += f"- **Price Level**: {price_insights['price_level']}\n"
-            if 'typical_price_range' in price_insights and price_insights['typical_price_range']:
-                range_data = price_insights['typical_price_range']
-                content += f"- **Typical Range**: {range_data[0]} - {range_data[1]} {metadata.get('currency', 'USD')}\n"
-            content += "\n"
-        
-        # Best flights
-        if best_flights:
-            content += f"## Best Flights ({len(best_flights)})\n\n"
-            for i, flight in enumerate(best_flights[:5]):  # Show top 5
-                content += f"### Option {i+1}\n"
-                content += f"- **Price**: {flight.get('price', 'N/A')} {metadata.get('currency', 'USD')}\n"
-                content += f"- **Total Duration**: {flight.get('total_duration', 0)} minutes\n"
-                content += f"- **Flights**: {len(flight.get('flights', []))}\n"
-                if flight.get('layovers'):
-                    content += f"- **Layovers**: {len(flight['layovers'])}\n"
-                
-                # Flight details
-                for j, leg in enumerate(flight.get('flights', [])):
-                    dep_airport = leg.get('departure_airport', {})
-                    arr_airport = leg.get('arrival_airport', {})
-                    content += f"  - **Flight {j+1}**: {dep_airport.get('id', 'N/A')} → {arr_airport.get('id', 'N/A')}\n"
-                    content += f"    - Departure: {dep_airport.get('time', 'N/A')}\n"
-                    content += f"    - Arrival: {arr_airport.get('time', 'N/A')}\n"
-                    content += f"    - Airline: {leg.get('airline', 'N/A')}\n"
-                    content += f"    - Flight Number: {leg.get('flight_number', 'N/A')}\n"
-                
-                content += "\n"
-        
-        # Other flights summary
-        if other_flights:
-            content += f"## Other Flights\n"
-            content += f"Total other options: {len(other_flights)}\n"
-            content += f"Price range: {min(f.get('price', 0) for f in other_flights)} - {max(f.get('price', 0) for f in other_flights)} {metadata.get('currency', 'USD')}\n\n"
-        
-        return content
-        
-    except json.JSONDecodeError:
-        return f"# Error\n\nCorrupted flight data for search ID: {search_id}"
-
-@mcp.prompt()
-def travel_planning_prompt(
-    departure: str,
+# ----------------------------
+# 3) Criar um plano de viagem (para o Supervisor manter estado entre agentes)
+# ----------------------------
+@mcp.tool()
+def create_trip_plan(
+    origin: str,
     destination: str,
-    departure_date: str,
+    outbound_date: str,
     return_date: str = "",
     passengers: int = 1,
-    budget: str = "",
-    preferences: str = ""
-) -> str:
-    """Generate a comprehensive travel planning prompt for Claude."""
-    
-    prompt = f"""Plan a comprehensive trip from {departure} to {destination} departing on {departure_date}"""
-    
-    if return_date:
-        prompt += f" and returning on {return_date}"
-    else:
-        prompt += " (one way)"
-    
-    prompt += f" for {passengers} passenger{'s' if passengers != 1 else ''}."
-    
-    if budget:
-        prompt += f" Budget consideration: {budget}."
-    
-    if preferences:
-        prompt += f" Travel preferences: {preferences}."
-    
-    prompt += f"""
+    budget: str = ""
+) -> Dict[str, Any]:
+    """
+    Cria um 'trip plan' mínimo e salva em trips/{trip_id}.json.
+    """
+    _ensure_dir(TRIPS_DIR)
 
-Please help with the following travel planning tasks:
+    trip_id = f"trip_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    plan = {
+        "trip_id": trip_id,
+        "created_at": datetime.now().isoformat(),
+        "origin": origin,
+        "destination": destination,
+        "outbound_date": outbound_date,
+        "return_date": return_date,
+        "passengers": passengers,
+        "budget": budget,
+        "selected_flight": None,
+        "selected_stay": None
+    }
 
-1. **Flight Search**: Use the search_flights tool to find the best flight options:
-   - Search for flights from {departure} to {destination}
-   - Departure date: {departure_date}"""
-    
-    if return_date:
-        prompt += f"""
-   - Return date: {return_date}
-   - Trip type: Round trip (1)"""
-    else:
-        prompt += f"""
-   - Trip type: One way (2)"""
-    
-    prompt += f"""
-   - Number of passengers: {passengers}
-   - Analyze price insights and recommend best options
+    _write_json(os.path.join(TRIPS_DIR, f"{trip_id}.json"), plan)
+    return plan
 
-2. **Flight Analysis**: Once flights are found, provide:
-   - Summary of the best flight options with pros and cons
-   - Price comparison and value analysis
-   - Duration and layover analysis
-   - Airline and aircraft information
-   - Carbon emissions comparison if available
+# ----------------------------
+# 4) Selecionar voo no plano (handoff do agente de voos -> Supervisor)
+# ----------------------------
+@mcp.tool()
+def set_selected_flight(trip_id: str, search_id: str, option_id: str) -> Dict[str, Any]:
+    """
+    Salva no plano a referência do voo escolhido (search_id + option_id).
+    """
+    _ensure_dir(TRIPS_DIR)
+    path = os.path.join(TRIPS_DIR, f"{trip_id}.json")
+    if not os.path.exists(path):
+        return {"error": f"Plano não encontrado: trip_id={trip_id}"}
 
-3. **Travel Recommendations**: Based on the destination and dates:
-   - Best times to book and travel tips
-   - Airport information and transportation options
-   - Weather considerations for travel dates
-   - General destination tips and highlights
+    plan = _read_json(path)
+    plan["selected_flight"] = {
+        "search_id": search_id,
+        "option_id": option_id,
+        "selected_at": datetime.now().isoformat()
+    }
+    _write_json(path, plan)
+    return plan
 
-4. **Budget Planning**: If budget information provided:
-   - Flight cost analysis within budget
-   - Tips for finding better deals
-   - Alternative travel dates if current search is expensive
+# ----------------------------
+# 5) Busca mock de hospedagem (rápida) para substituir o seu search_hotels de timeout
+# ----------------------------
+@mcp.tool()
+def search_stays_mock(city: str, check_in: str, check_out: str, guests: int = 1) -> Dict[str, Any]:
+    """
+    Retorna opções mock de hospedagem (não depende de API externa).
+    Serve para testar o roteamento do agente de hotéis sem gerar timeout.
+    """
+    stays = [
+        {"stay_id": "stay_001", "name": "Hotel Central", "neighborhood": "Centro", "price_per_night": 120},
+        {"stay_id": "stay_002", "name": "Garden Inn", "neighborhood": "Jardins", "price_per_night": 180},
+        {"stay_id": "stay_003", "name": "Budget Stay", "neighborhood": "Próximo ao metrô", "price_per_night": 80},
+    ]
 
-Present the information in a clear, organized format with actionable recommendations. Use the flight search tools first, then provide comprehensive analysis and recommendations based on the results."""
+    return {
+        "city": city,
+        "check_in": check_in,
+        "check_out": check_out,
+        "guests": guests,
+        "results": stays,
+        "currency": "USD",
+        "note": "Lista mock fixa para teste."
+    }
 
-    return prompt
+# ----------------------------
+# 6) Selecionar hospedagem no plano
+# ----------------------------
+@mcp.tool()
+def set_selected_stay(trip_id: str, stay_id: str) -> Dict[str, Any]:
+    """
+    Salva no plano a hospedagem escolhida.
+    """
+    _ensure_dir(TRIPS_DIR)
+    path = os.path.join(TRIPS_DIR, f"{trip_id}.json")
+    if not os.path.exists(path):
+        return {"error": f"Plano não encontrado: trip_id={trip_id}"}
 
-@mcp.prompt()
-def flight_comparison_prompt(search_id: str) -> str:
-    """Generate a prompt for detailed flight comparison and analysis."""
-    
-    return f"""Analyze and compare the flight options from search ID: {search_id}
+    plan = _read_json(path)
+    plan["selected_stay"] = {"stay_id": stay_id, "selected_at": datetime.now().isoformat()}
+    _write_json(path, plan)
+    return plan
 
-Please provide a comprehensive analysis including:
+# ----------------------------
+# 7) Simulador de timeout/erro controlado (para testar robustez do Supervisor)
+# ----------------------------
+@mcp.tool()
+async def simulate_provider_timeout(seconds: int = 15) -> Dict[str, Any]:
+    """
+    Simula lentidão. Útil para validar cancelamento, timeout e fallback no roteamento do agente.
+    """
+    await asyncio.sleep(max(0, seconds))
+    return {"ok": True, "slept_seconds": seconds}
 
-1. **Flight Overview**: Use get_flight_details('{search_id}') to retrieve the complete flight data
-
-2. **Best Options Analysis**:
-   - Top 3-5 recommended flights with detailed breakdown
-   - Price-to-value ratio analysis
-   - Total travel time comparison
-   - Layover analysis (duration, airports, overnight stays)
-
-3. **Detailed Comparison Table**:
-   - Price comparison across all options
-   - Duration comparison (flight time vs total time)
-   - Number of stops and layover quality
-   - Airlines and aircraft types
-   - Departure/arrival times convenience
-
-4. **Filtering Suggestions**:
-   - Use filter_flights_by_price to show budget-friendly options
-   - Use filter_flights_by_airline for preferred carriers
-   - Highlight direct flights vs connections
-
-5. **Decision Recommendations**:
-   - Best overall value option
-   - Fastest travel option
-   - Most convenient schedule option
-   - Budget-conscious option
-
-6. **Booking Considerations**:
-   - Price trends and booking timing advice
-   - Airline policies and baggage considerations
-   - Seat selection and upgrade opportunities
-
-Please format the analysis in a clear, easy-to-read structure with specific recommendations for different traveler priorities (speed, cost, convenience, comfort)."""
-
-if __name__ == "__main__":
-    if os.environ.get("MCP_TRANSPORT", "").lower() == "sse":
-        # mcp.server.fastmcp.FastMCP.run() only accepts transport= and mount_path=;
-        # host/port are taken from FastMCP(...) above (PORT / FASTMCP_HOST).
-        mcp.run(transport="sse")
-    else:
-        mcp.run(transport="stdio")
+# ----------------------------
+# (Opcional) manter a tool problemática comentada (se você quiser)
+# ----------------------------
+# @mcp.tool()
+# async def search_hotels(city: str, check_in: str, check_out: str, guests: int) -> str:
+#     await asyncio.sleep(180)
+#     return f"search_hotels finished after 180s — city={city!r}, check_in={check_in!r}, check_out={check_out!r}, guests={guests}"

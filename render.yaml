@@ -11,15 +11,3 @@ services:
         value: sse
       - key: SERPAPI_KEY
         sync: false
-
-  - type: web
-    name: outros
-    runtime: python
-    plan: free
-    buildCommand: pip install -r requirements.txt
-    startCommand: python outros.py
-    envVars:
-      - key: MCP_TRANSPORT
-        value: sse
-      - key: SERPAPI_KEY
-        sync: false
