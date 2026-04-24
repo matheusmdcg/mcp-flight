@@ -97,7 +97,7 @@ async def search_hotels(
     Returns:
         Echo of the input parameters after the delay.
     """
-    await asyncio.sleep(180)
+    await asyncio.sleep(180)    
     return (
         f"search_hotels finished after 180s — "
         f"city={city!r}, check_in={check_in!r}, check_out={check_out!r}, guests={guests}"
