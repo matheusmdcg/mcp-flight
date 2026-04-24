@@ -1,8 +1,9 @@
-import os
+import requests
 import json
+import os
 import asyncio
-from typing import Dict, Any, Optional, List
-from datetime import datetime
+from typing import List, Dict, Optional, Any
+from datetime import datetime, timedelta
 from mcp.server.fastmcp import FastMCP
 
 # Reaproveita o estilo do seu server atual (host/port via env)
@@ -251,3 +252,12 @@ async def simulate_provider_timeout(seconds: int = 15) -> Dict[str, Any]:
 # async def search_hotels(city: str, check_in: str, check_out: str, guests: int) -> str:
 #     await asyncio.sleep(180)
 #     return f"search_hotels finished after 180s — city={city!r}, check_in={check_in!r}, check_out={check_out!r}, guests={guests}"
+
+
+if __name__ == "__main__":
+    if os.environ.get("MCP_TRANSPORT", "").lower() == "sse":
+        # mcp.server.fastmcp.FastMCP.run() only accepts transport= and mount_path=;
+        # host/port are taken from FastMCP(...) above (PORT / FASTMCP_HOST).
+        mcp.run(transport="sse")
+    else:
+        mcp.run(transport="stdio")
