@@ -51,6 +51,172 @@ def _write_json(path: str, data: Dict[str, Any]) -> None:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
 # ----------------------------
+# Novos search flights
+# ----------------------------
+
+@mcp.tool()
+def search_flights(
+    departure_id: str,
+    arrival_id: str,
+    outbound_date: str,
+    return_date: Optional[str] = None,
+    trip_type: int = 1,
+    adults: int = 1,
+    children: int = 0,
+    infants_in_seat: int = 0,
+    infants_on_lap: int = 0,
+    travel_class: int = 1,
+    currency: str = "USD",
+    country: str = "us",
+    language: str = "en",
+    max_results: int = 10
+) -> Dict[str, Any]:
+    """
+    Search for flights using SerpAPI's Google Flights API.
+    
+    Args:
+        departure_id: Departure airport code (e.g., 'LAX', 'JFK') or location kgmid
+        arrival_id: Arrival airport code (e.g., 'CDG', 'LHR') or location kgmid
+        outbound_date: Departure date in YYYY-MM-DD format (e.g., '2024-12-15')
+        return_date: Return date in YYYY-MM-DD format (required for round trips)
+        trip_type: Flight type (1=Round trip, 2=One way, 3=Multi-city)
+        adults: Number of adult passengers (default: 1)
+        children: Number of child passengers (default: 0)
+        infants_in_seat: Number of infants in seat (default: 0)
+        infants_on_lap: Number of infants on lap (default: 0)
+        travel_class: Travel class (1=Economy, 2=Premium economy, 3=Business, 4=First)
+        currency: Currency for prices (default: 'USD')
+        country: Country code for search (default: 'us')
+        language: Language code (default: 'en')
+        max_results: Maximum number of results to store (default: 10)
+        
+    Returns:
+        Dict containing flight search results and metadata
+    """
+    
+    try:
+        api_key = get_serpapi_key()
+        dep_id = normalize_location_id(departure_id)
+        arr_id = normalize_location_id(arrival_id)
+
+        # Build search parameters
+        params = {
+            "engine": "google_flights",
+            "api_key": api_key,
+            "departure_id": dep_id,
+            "arrival_id": arr_id,
+            "outbound_date": outbound_date,
+            "type": trip_type,
+            "adults": adults,
+            "children": children,
+            "infants_in_seat": infants_in_seat,
+            "infants_on_lap": infants_on_lap,
+            "travel_class": travel_class,
+            "currency": currency,
+            "gl": country,
+            "hl": language
+        }
+        
+        # Add return date for round trips
+        if trip_type == 1 and return_date:
+            params["return_date"] = return_date
+        elif trip_type == 1 and not return_date:
+            return {"error": "Return date is required for round trip flights"}
+        
+        # Make API request
+        response = requests.get("https://serpapi.com/search", params=params)
+        response.raise_for_status()
+        
+        flight_data = response.json()
+        
+        # Create search identifier
+        search_id = f"{dep_id}_{arr_id}_{outbound_date}"
+        if return_date:
+            search_id += f"_{return_date}"
+        search_id += f"_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        
+        # Create directory structure
+        os.makedirs(FLIGHTS_DIR, exist_ok=True)
+        
+        # Process and store flight results
+        processed_results = {
+            "search_metadata": {
+                "search_id": search_id,
+                "departure": dep_id,
+                "arrival": arr_id,
+                "outbound_date": outbound_date,
+                "return_date": return_date,
+                "trip_type": "Round trip" if trip_type == 1 else "One way" if trip_type == 2 else "Multi-city",
+                "passengers": {
+                    "adults": adults,
+                    "children": children,
+                    "infants_in_seat": infants_in_seat,
+                    "infants_on_lap": infants_on_lap
+                },
+                "travel_class": ["Economy", "Premium economy", "Business", "First"][travel_class - 1],
+                "currency": currency,
+                "search_timestamp": datetime.now().isoformat()
+            },
+            "best_flights": flight_data.get("best_flights", [])[:max_results],
+            "other_flights": flight_data.get("other_flights", [])[:max_results],
+            "price_insights": flight_data.get("price_insights", {}),
+            "airports": flight_data.get("airports", [])
+        }
+        
+        # Save results to file
+        file_path = os.path.join(FLIGHTS_DIR, f"{search_id}.json")
+        with open(file_path, "w") as f:
+            json.dump(processed_results, f, indent=2)
+        
+        print(f"Flight search results saved to: {file_path}")
+        
+        # Return summary for the user
+        summary = {
+            "search_id": search_id,
+            "total_best_flights": len(processed_results["best_flights"]),
+            "total_other_flights": len(processed_results["other_flights"]),
+            "price_range": {
+                "lowest_price": processed_results["price_insights"].get("lowest_price"),
+                "currency": currency
+            },
+            "search_parameters": processed_results["search_metadata"]
+        }
+        
+        return summary
+        
+    except requests.exceptions.RequestException as e:
+        return {"error": f"API request failed: {str(e)}"}
+    except ValueError as e:
+        return {"error": str(e)}
+    except Exception as e:
+        return {"error": f"Unexpected error: {str(e)}"}
+
+@mcp.tool()
+def get_flight_details(search_id: str) -> str:
+    """
+    Get detailed information about a specific flight search.
+    
+    Args:
+        search_id: The search ID returned from search_flights
+        
+    Returns:
+        JSON string with detailed flight information
+    """
+    
+    file_path = os.path.join(FLIGHTS_DIR, f"{search_id}.json")
+    
+    if not os.path.exists(file_path):
+        return f"No flight search found with ID: {search_id}"
+    
+    try:
+        with open(file_path, "r") as f:
+            flight_data = json.load(f)
+        return json.dumps(flight_data, indent=2)
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        return f"Error reading flight data for {search_id}: {str(e)}"
+
+
+# ----------------------------
 # 1) Resolver local (texto livre) -> candidatos (IATA mock)
 # ----------------------------
 @mcp.tool()
@@ -95,7 +261,7 @@ def resolve_location(query: str, country_hint: str = "BR") -> Dict[str, Any]:
 # 2) Listar opções de voos a partir de um search_id salvo (UX para escolher)
 #    (o seu server já salva JSON em flights/{search_id}.json)
 # ----------------------------
-@mcp.tool()
+# @mcp.tool()
 def list_flight_options(search_id: str, limit: int = 10, prefer: str = "best") -> Dict[str, Any]:
     """
     Lê o arquivo flights/{search_id}.json e gera uma lista curta e estável de opções com option_id.
@@ -172,7 +338,7 @@ def create_trip_plan(
 # ----------------------------
 # 4) Selecionar voo no plano (handoff do agente de voos -> Supervisor)
 # ----------------------------
-@mcp.tool()
+# @mcp.tool()
 def set_selected_flight(trip_id: str, search_id: str, option_id: str) -> Dict[str, Any]:
     """
     Salva no plano a referência do voo escolhido (search_id + option_id).
