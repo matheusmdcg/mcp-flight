@@ -7,16 +7,43 @@ from datetime import datetime, timedelta
 from mcp.server.fastmcp import FastMCP
 
 # Reaproveita o estilo do seu server atual (host/port via env)
+import os
+from typing import Any
+
+from mcp.server.fastmcp import FastMCP
+from auth.basic_auth import wrap_app_with_optional_basic_auth
+
+
 def _listen_host() -> str:
     if os.environ.get("MCP_TRANSPORT", "").lower() == "sse":
         return os.environ.get("FASTMCP_HOST", "0.0.0.0")
     return "127.0.0.1"
 
+
 def _listen_port() -> int:
     port_str = os.environ.get("PORT") or os.environ.get("FASTMCP_PORT")
     return int(port_str) if port_str else 8000
 
-mcp = FastMCP("travel-mock-assistant", host=_listen_host(), port=_listen_port())
+
+mcp = FastMCP("my-mcp", host=_listen_host(), port=_listen_port())
+
+
+def _sse_app_with_optional_basic_auth() -> Any:
+    return wrap_app_with_optional_basic_auth(mcp.sse_app())
+
+
+if __name__ == "__main__":
+    if os.environ.get("MCP_TRANSPORT", "").lower() == "sse":
+        import uvicorn
+
+        uvicorn.run(
+            _sse_app_with_optional_basic_auth(),
+            host=_listen_host(),
+            port=_listen_port(),
+            log_level="info",
+        )
+    else:
+        mcp.run(transport="stdio")
 
 def get_serpapi_key() -> str:
     """Get SerpAPI key from environment variable."""
