@@ -97,7 +97,7 @@ def register_external_tools(
             search_id += f"_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
             
             # Create directory structure
-            os.makedirs(FLIGHTS_DIR, exist_ok=True)
+            os.makedirs(flights_dir, exist_ok=True)
             
             # Process and store flight results
             processed_results = {
@@ -125,7 +125,7 @@ def register_external_tools(
             }
             
             # Save results to file
-            file_path = os.path.join(FLIGHTS_DIR, f"{search_id}.json")
+            file_path = os.path.join(flights_dir, f"{search_id}.json")
             with open(file_path, "w") as f:
                 json.dump(processed_results, f, indent=2)
             
@@ -164,7 +164,7 @@ def register_external_tools(
             JSON string with detailed flight information
         """
         
-        file_path = os.path.join(FLIGHTS_DIR, f"{search_id}.json")
+        file_path = os.path.join(flights_dir, f"{search_id}.json")
         
         if not os.path.exists(file_path):
             return f"No flight search found with ID: {search_id}"
@@ -228,8 +228,8 @@ def register_external_tools(
         Lê o arquivo flights/{search_id}.json e gera uma lista curta e estável de opções com option_id.
         Útil para o usuário escolher 'livremente' um voo.
         """
-        _ensure_dir(FLIGHTS_DIR)
-        path = os.path.join(FLIGHTS_DIR, f"{search_id}.json")
+        _ensure_dir(flights_dir)
+        path = os.path.join(flights_dir, f"{search_id}.json")
         if not os.path.exists(path):
             return {"error": f"Nenhuma busca encontrada para search_id={search_id}"}
 
