@@ -26,6 +26,11 @@ def _listen_host() -> str:
     return "127.0.0.1"
 
 
+def _listen_port() -> int:
+    """HTTP port: Render sets PORT; optional FASTMCP_PORT for local SSE."""
+    port_str = os.environ.get("PORT") or os.environ.get("FASTMCP_PORT")
+    return int(port_str) if port_str else 8000
+
 # Initialize FastMCP server (host/port apply to SSE/streamable-http; ignored for stdio)
 mcp = FastMCP("flight-assistant", host=_listen_host(), port=_listen_port())
 
