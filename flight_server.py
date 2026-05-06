@@ -13,18 +13,10 @@ from tools.prompts import register_prompts
 # Directory to store flight search results
 FLIGHTS_DIR = "flights"
 
-def _is_http_transport() -> bool:
-    """Whether MCP transport is an HTTP streaming mode (SSE / Streamable HTTP)."""
-    transport = os.environ.get("MCP_TRANSPORT", "").strip().lower()
-    return transport in ("sse", "streamable_http", "streamable-http")
-
-def _transport() -> str:
-    return os.environ.get("MCP_TRANSPORT", "").strip().lower()
-
 
 def _listen_host() -> str:
-    """HTTP bind host for SSE (mcp.server.fastmcp reads host/port from FastMCP settings, not run())."""
-    if _is_http_transport():
+    """HTTP bind host for HTTP-based transports (SSE/streamable-http/http)."""
+    if os.environ.get("MCP_TRANSPORT", "").strip().lower() in ("sse", "streamable-http", "http"):
         return os.environ.get("FASTMCP_HOST", "0.0.0.0")
     return "127.0.0.1"
 
@@ -35,13 +27,15 @@ def _listen_port() -> int:
     return int(port_str) if port_str else 8000
 
 
-# Initialize FastMCP server.
-# For HTTP, we run via Uvicorn using the ASGI app returned by FastMCP.
+# Initialize FastMCP server (host/port are provided by the HTTP runner, not the constructor)
 mcp = FastMCP("flight-assistant")
 
 
-def _sse_app_with_optional_basic_auth() -> Any:
-    app = mcp.sse_app()
+def _http_app_with_optional_auth() -> Any:
+    app = mcp.http_app(transport="streamable-http")
+    sse_app = mcp.http_app(transport="sse")
+    app.router.routes.extend(sse_app.router.routes)
+
     mode = os.environ.get("MCP_AUTH_MODE", "").strip().lower()
     if mode in ("", "auto"):
         app = wrap_app_with_optional_bearer_jwt_auth(app)
@@ -65,33 +59,6 @@ def _sse_app_with_optional_basic_auth() -> Any:
         "Invalid MCP_AUTH_MODE. Use one of: auto, none, basic, oauth2"
     )
     return app
-
-
-def _streamable_http_app_with_optional_basic_auth() -> Any:
-    # FastMCP's HTTP deployment uses Streamable HTTP by default (mounted at /mcp).
-    app = mcp.http_app()
-    mode = os.environ.get("MCP_AUTH_MODE", "").strip().lower()
-    if mode in ("", "auto"):
-        app = wrap_app_with_optional_bearer_jwt_auth(app)
-        app = wrap_app_with_optional_basic_auth(app)
-        return app
-
-    if mode in ("none", "off", "disabled"):
-        return app
-
-    if mode in ("basic",):
-        return wrap_app_with_optional_basic_auth(app)
-
-    if mode in ("bearer", "bearer-jwt", "jwt", "oauth2"):
-        if not os.environ.get("MCP_OAUTH2_JWKS_URL"):
-            raise ValueError(
-                "MCP_AUTH_MODE=oauth2 requires MCP_OAUTH2_JWKS_URL to be set."
-            )
-        return wrap_app_with_optional_bearer_jwt_auth(app)
-
-    raise ValueError(
-        "Invalid MCP_AUTH_MODE. Use one of: auto, none, basic, oauth2"
-    )
 
 
 def get_serpapi_key() -> str:
@@ -123,16 +90,11 @@ register_prompts(mcp)
 
 
 if __name__ == "__main__":
-    if _is_http_transport():
+    if os.environ.get("MCP_TRANSPORT", "").strip().lower() in ("sse", "streamable-http", "http"):
         import uvicorn
 
-        if _transport() == "sse":
-            app = _sse_app_with_optional_basic_auth()
-        else:
-            app = _streamable_http_app_with_optional_basic_auth()
-
         uvicorn.run(
-            app,
+            _http_app_with_optional_auth(),
             host=_listen_host(),
             port=_listen_port(),
             log_level="info",
