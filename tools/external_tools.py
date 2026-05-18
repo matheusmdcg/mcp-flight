@@ -321,45 +321,45 @@ def register_external_tools(
     # ----------------------------
     # 5) Busca mock de hospedagem (rápida) para substituir o seu search_hotels de timeout
     # ----------------------------
-    # @mcp.tool()
-    # def search_stays_mock(city: str, check_in: str, check_out: str, guests: int = 1) -> Dict[str, Any]:
-    #     """
-    #     Retorna opções mock de hospedagem (não depende de API externa).
-    #     Serve para testar o roteamento do agente de hotéis sem gerar timeout.
-    #     """
-    #     stays = [
-    #         {"stay_id": "stay_001", "name": "Hotel Central", "neighborhood": "Centro", "price_per_night": 120},
-    #         {"stay_id": "stay_002", "name": "Garden Inn", "neighborhood": "Jardins", "price_per_night": 180},
-    #         {"stay_id": "stay_003", "name": "Budget Stay", "neighborhood": "Próximo ao metrô", "price_per_night": 80},
-    #     ]
+    @mcp.tool()
+    def search_stays_mock(city: str, check_in: str, check_out: str, guests: int = 1) -> Dict[str, Any]:
+        """
+        Retorna opções mock de hospedagem (não depende de API externa).
+        Serve para testar o roteamento do agente de hotéis sem gerar timeout.
+        """
+        stays = [
+            {"stay_id": "stay_001", "name": "Hotel Central", "neighborhood": "Centro", "price_per_night": 120},
+            {"stay_id": "stay_002", "name": "Garden Inn", "neighborhood": "Jardins", "price_per_night": 180},
+            {"stay_id": "stay_003", "name": "Budget Stay", "neighborhood": "Próximo ao metrô", "price_per_night": 80},
+        ]
 
-    #     return {
-    #         "city": city,
-    #         "check_in": check_in,
-    #         "check_out": check_out,
-    #         "guests": guests,
-    #         "results": stays,
-    #         "currency": "USD",
-    #         "note": "Lista mock fixa para teste."
-    #     }
+        return {
+            "city": city,
+            "check_in": check_in,
+            "check_out": check_out,
+            "guests": guests,
+            "results": stays,
+            "currency": "USD",
+            "note": "Lista mock fixa para teste."
+        }
 
     # ----------------------------
     # 6) Selecionar hospedagem no plano
     # ----------------------------
-    # @mcp.tool()
-    # def set_selected_stay(trip_id: str, stay_id: str) -> Dict[str, Any]:
-    #     """
-    #     Salva no plano a hospedagem escolhida.
-    #     """
-    #     _ensure_dir(TRIPS_DIR)
-    #     path = os.path.join(TRIPS_DIR, f"{trip_id}.json")
-    #     if not os.path.exists(path):
-    #         return {"error": f"Plano não encontrado: trip_id={trip_id}"}
+    @mcp.tool()
+    def set_selected_stay(trip_id: str, stay_id: str) -> Dict[str, Any]:
+        """
+        Salva no plano a hospedagem escolhida.
+        """
+        _ensure_dir(TRIPS_DIR)
+        path = os.path.join(TRIPS_DIR, f"{trip_id}.json")
+        if not os.path.exists(path):
+            return {"error": f"Plano não encontrado: trip_id={trip_id}"}
 
-    #     plan = _read_json(path)
-    #     plan["selected_stay"] = {"stay_id": stay_id, "selected_at": datetime.now().isoformat()}
-    #     _write_json(path, plan)
-    #     return plan
+        plan = _read_json(path)
+        plan["selected_stay"] = {"stay_id": stay_id, "selected_at": datetime.now().isoformat()}
+        _write_json(path, plan)
+        return plan
 
     # ----------------------------
     # 7) Simulador de timeout/erro controlado (para testar robustez do Supervisor)
