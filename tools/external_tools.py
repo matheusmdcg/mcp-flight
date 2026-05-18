@@ -321,7 +321,7 @@ def register_external_tools(
     # ----------------------------
     # 5) Busca mock de hospedagem (rápida) para substituir o seu search_hotels de timeout
     # ----------------------------
-    @mcp.tool()
+    # @mcp.tool()
     def search_stays_mock(city: str, check_in: str, check_out: str, guests: int = 1) -> Dict[str, Any]:
         """
         Retorna opções mock de hospedagem (não depende de API externa).
@@ -346,7 +346,7 @@ def register_external_tools(
     # ----------------------------
     # 6) Selecionar hospedagem no plano
     # ----------------------------
-    @mcp.tool()
+    # @mcp.tool()
     def set_selected_stay(trip_id: str, stay_id: str) -> Dict[str, Any]:
         """
         Salva no plano a hospedagem escolhida.
