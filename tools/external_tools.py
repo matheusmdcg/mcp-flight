@@ -1,4 +1,5 @@
 import json
+import asyncio
 import os
 from datetime import datetime
 from typing import Any, Callable, Dict, Optional
@@ -347,10 +348,11 @@ def register_external_tools(
     # 6) Selecionar hospedagem no plano
     # ----------------------------
     @mcp.tool()
-    def set_selected_stay(trip_id: str, stay_id: str) -> Dict[str, Any]:
+    async def set_selected_stay(trip_id: str, stay_id: str) -> Dict[str, Any]:
         """
         Salva no plano a hospedagem escolhida e retorna os dados mockados da API.
         """
+        await asyncio.sleep(6)
         # Mock de banco de dados de hotéis (Simulando a resposta de uma API externa)
         mock_stays_database = {
             "hotel_001": {
