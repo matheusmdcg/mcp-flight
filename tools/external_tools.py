@@ -277,7 +277,7 @@ def register_external_tools(
         """
         Cria um 'trip plan' mínimo e salva em trips/{trip_id}.json.
         """
-        _ensure_dir(TRIPS_DIR)
+        _ensure_dir(flights_dir)
 
         trip_id = f"trip_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         plan = {
@@ -293,7 +293,7 @@ def register_external_tools(
             "selected_stay": None
         }
 
-        _write_json(os.path.join(TRIPS_DIR, f"{trip_id}.json"), plan)
+        _write_json(os.path.join(flights_dir, f"{trip_id}.json"), plan)
         return plan
 
     # ----------------------------
@@ -304,8 +304,8 @@ def register_external_tools(
         """
         Salva no plano a referência do voo escolhido (search_id + option_id).
         """
-        _ensure_dir(TRIPS_DIR)
-        path = os.path.join(TRIPS_DIR, f"{trip_id}.json")
+        _ensure_dir(flights_dir)
+        path = os.path.join(flights_dir, f"{trip_id}.json")
         if not os.path.exists(path):
             return {"error": f"Plano não encontrado: trip_id={trip_id}"}
 
@@ -346,20 +346,59 @@ def register_external_tools(
     # ----------------------------
     # 6) Selecionar hospedagem no plano
     # ----------------------------
-    @mcp.tool()
-    def set_selected_stay(trip_id: str, stay_id: str) -> Dict[str, Any]:
-        """
-        Salva no plano a hospedagem escolhida.
-        """
-        _ensure_dir(TRIPS_DIR)
-        path = os.path.join(TRIPS_DIR, f"{trip_id}.json")
-        if not os.path.exists(path):
-            return {"error": f"Plano não encontrado: trip_id={trip_id}"}
+ @mcp.tool()
+def set_selected_stay(trip_id: str, stay_id: str) -> Dict[str, Any]:
+    """
+    Salva no plano a hospedagem escolhida e retorna os dados mockados da API.
+    """
+    # Mock de banco de dados de hotéis (Simulando a resposta de uma API externa)
+    mock_stays_database = {
+        "hotel_001": {
+            "name": "Grand Plaza Hotel",
+            "address": "Av. Paulista, 1234 - São Paulo",
+            "stars": 4.5,
+            "price_per_night": 450.00,
+            "currency": "BRL",
+            "amenities": ["Wi-Fi Grátis", "Piscina", "Café da Manhã Incluso"],
+            "check_in": "14:00",
+            "check_out": "12:00"
+        },
+        "hotel_002": {
+            "name": "Copacabana Beach Resort",
+            "address": "Av. Atlântica, 500 - Rio de Janeiro",
+            "stars": 5.0,
+            "price_per_night": 890.00,
+            "currency": "BRL",
+            "amenities": ["Frente para o Mar", "Spa", "Academia", "Bar no Rooftop"],
+            "check_in": "15:00",
+            "check_out": "11:00"
+        }
+    }
 
-        plan = _read_json(path)
-        plan["selected_stay"] = {"stay_id": stay_id, "selected_at": datetime.now().isoformat()}
-        _write_json(path, plan)
-        return plan
+    # Busca o hotel no mock ou usa um fallback genérico caso o ID não exista
+    stay_details = mock_stays_database.get(
+        stay_id, 
+        {
+            "name": "Hotel Padrão Selecionado",
+            "address": "Endereço em análise",
+            "stars": 4.0,
+            "price_per_night": 300.00,
+            "currency": "BRL",
+            "amenities": ["Wi-Fi"],
+            "check_in": "14:00",
+            "check_out": "12:00"
+        }
+    )
+
+    # Retorno estruturado simulando o sucesso da operação na API
+    return {
+        "status": "success",
+        "trip_id": trip_id,
+        "stay_id": stay_id,
+        "booking_status": "CONFIRMED_IN_PLAN",
+        "stay_details": stay_details,
+        "message": f"Hospedagem '{stay_details['name']}' vinculada com sucesso à viagem {trip_id}."
+    }
 
     # ----------------------------
     # 7) Simulador de timeout/erro controlado (para testar robustez do Supervisor)
